@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<meta charset="UTF-8">
+	<title>Drag &amp; Drop Images and Preview with indexedDB</title>
+	<style>
+		#dropbox {
+			width: 100%;
+			height: 300px;
+			border: 1px solid #888;
+			background-color: #e5d6a9; 
+			margin-top: 20px;
+			line-height: 300px;
+			text-align : center;
+		}
+		#imglist .box {
+			float: left;
+			width: 100px;
+			height: 100px;
+			border: 5px solid #eee;
+			margin: 5px;
+			position: relative;
+		}
+		#imglist .box:hover {
+			border: 5px solid #888;
+		}		
+		#imglist .btn-x {
+			position: absolute;
+			top: 5px;
+			right: 5px;
+			width: 20px;
+			height: 20px;
+			line-height: 20px;
+			text-align: center;
+			border-radius: 10px;
+			background-color: #000;
+			color: #fff;
+			cursor: pointer;
+			z-index: 999;
+		}
+		#imglist .preview {
+			position: absolute;
+			width: 100px;
+			height: 100px;			
+			top: 0;
+			left: 0;
+		}		
+		#imglist .btn-x:hover {
+			background-color: #f00;
+		}
+		#imglist img {
+			width: 100px;
+			height: 100px;
+			
+		}
+	</style>
+</head>
+<body>
+	<div class="wrap">
+		<div>
+			<button onclick="clearData()">초기화(모든 레코드삭제)</button>
+			<button onclick="deleteDb('myphotogallary')">DB(myphotogallary) 삭제</button>
+			<button onclick="deleteAllDbs()">모든 DB 삭제(only for google chrome)</button>
+			<button onclick="location.reload()">페이지 새로고침</button>
+		</div>
+		<div id="dropbox" ondrop="drop(event)" ondragover="dragover(event)" ondragleave="dragleave(event)">
+			Drop Images Here
+		</div>
+		<div id="imglist"></div>
+	</div>
+	
+	<script>
+
+		var db;
+		var request = window.indexedDB.open("myphotogallary",1);
+		
+		request.onerror = function(event) {
+            console.log("error: ");
+         }
+         
+         request.onsuccess = function(event) {
+            db = request.result;
+            readAllDataFromDb();
+         }		
+
+		request.onupgradeneeded = function(event) {
+            var result = event.target.result;
+			var objectStore = result.createObjectStore("photos",{ keyPath: "id", autoIncrement:true });
+         }         
+
+		function addToDb(fileData) {
+            var transaction = db.transaction(["photos"], "readwrite");
+            var store = transaction.objectStore("photos");
+            var request = store.add(fileData);
+           
+            request.onsuccess = function(event) {
+            	//마지막으로 저장한 데이터의 key(id)를 얻는다. 
+            	var dbid = event.target.result;
+            	fileData.id = dbid;
+            	showDropedFiles(fileData);
+            };
+            
+            request.onerror = function(event) {
+               alert("failed");
+            }
+         }
+
+		function clearData() {
+			// 데이터 삭제를 위해 읽고 쓰기 가능한 db transaction을 연다.
+			var transaction = db.transaction(["photos"], "readwrite");
+			
+			// 작업이 모두 종료되면 처리할 내용...
+			transaction.oncomplete = function(event) {
+				//imglist의 내용을 모두 비운다. 
+				document.getElementById("imglist").innerHTML = "";
+			};
+
+			//에러가 발생하면 에러를 콘솔에 출력한다. 
+			transaction.onerror = function(event) {
+				console.log(transaction.error);
+			};
+
+			// 트랜젝션의 stor를 연다. 즉 DB 테이블을 여는 것과 같다.
+			var store = transaction.objectStore("photos");
+
+			// store, 즉 테이블을 모두 비운다. 
+			var request = store.clear();
+
+			// store, 즉 테이블 비우기가 성공하면 처리할 내용...
+			request.onsuccess = function(event) {
+				// 메시지를 콘솔에 출력한다. 
+				console.log("DB 레코드를 모두 제거했습니다.");
+			};
+		}
+
+		function deleteDb(dbname){
+			var request = indexedDB.deleteDatabase(dbname);
+			request.onsuccess = function () {
+				console.log("데이터베이스(" + dbname + ")를 제거했습니다.");
+			};
+			request.onerror = function () {
+				console.log("데이터베이스(" + dbname + ")를 제거하지 못했습니다.");
+			};
+			request.onblocked = function () {
+				console.log("데이터베이스(" + dbname + ")가 열려 있어 제거할 수 없습니다.");
+			};
+		}
+
+		function deleteAllDbs(dbname){
+			//모든 indexedDB를 제거 - google chrome에서만 작동, 참고코드임...
+
+			db.close(); // 현재 열려 있는 DB는 삭제할 수 없으므로 삭제하려면 닫아주어야 한다. 
+			//작업하고자 하는 DB를 삭제하면 데이터를 추가할 수 없으므로 페이지 새로고침 해주어 한다. 
+			indexedDB.webkitGetDatabaseNames().onsuccess = function(sender,args) {
+				var dblist = sender.target.result;
+				if(dblist){
+					var i;
+					for( i = 0; i < dblist.length; i++ ){
+						deleteDb(dblist[i]);
+					}
+				}
+			}
+			location.reload();
+		}
+
+		var imagesArray = [];
+
+		function drop(e){
+			e.preventDefault();
+			var data = e.dataTransfer;
+			var files = data.files;
+
+			if( files ) {
+				for(i=0;i<files.length;i++){
+					if( files[i].type == "image/jpeg" || files[i].type == "image/gif" || files[i].type == "image/png") {
+						readAndAddFiles(files[i]);
+					}
+				}
+			}
+			var tagetId = e.target.id;	
+			document.getElementById(tagetId).style.background = "#e5d6a9";
+		}
+
+		function dragover(e){
+			e.preventDefault();
+			var tagetId = e.target.id;	document.getElementById(tagetId).style.background = "pink";
+		}	
+
+		function dragleave(e){
+			e.preventDefault();
+			var tagetId = e.target.id;	document.getElementById(tagetId).style.background = "#e5d6a9";
+		}			
+
+		function readAndAddFiles(file){
+			var reader = new FileReader();
+			reader.addEventListener("load",function(){
+				var fileData = {"name":file.name,"size":file.size,"type":file.type,"src":reader.result};
+				addToDb(fileData);
+			},false);
+			if( file ) reader.readAsDataURL(file);
+		}	
+		
+		function deleteFile(id){
+            var transaction = db.transaction(["photos"], "readwrite");
+            var store = transaction.objectStore("photos");
+            var request = store.delete(id);
+           
+            request.onsuccess = function(event) {
+            	var box = document.getElementById("box" + id);
+            	box.parentElement.removeChild(box);
+            	console.log("DB에서 선택한 파일 정보를 제거했습니다.");
+            };
+            
+            request.onerror = function(event) {
+               alert("DB에서 파일 제거에 실패했습니다.");
+            }
+		}
+		function showDropedFiles(fileData){
+			var box = "<div class='box' id='box" + fileData.id + "'>";
+			box += "<div class='btn-x' onclick='deleteFile(" + fileData.id + ")'>X</div>";
+			box += "<div class='preview'>";
+    		box += "<img src='" + fileData.src + "' data-id='" + fileData.id + "' width='100' height='100' alt='" + fileData.name + "'>";
+    		box += "</div>"
+    		box += "</div>"
+			document.getElementById("imglist").innerHTML += box;
+		}
+
+		function readAllDataFromDb(){
+            var transaction = db.transaction(["photos"]);
+            var store = transaction.objectStore("photos");
+            
+			store.openCursor().onsuccess = function(event) {
+				var cursor = event.target.result;
+				if (cursor) {
+					showDropedFiles(cursor.value);
+					cursor.continue();
+				} else {
+					console.log("데이터가 없음");
+				}
+			};
+		}
+
+	</script>
+	<!--
+	Drag & Drop으로 한 개 또는 여러 개의 이미지 파일 등록 후 미리보기 썸네일 보여주고 indexedDB에 저장하여
+	페이지를 다시 열었을 때 이 전에 등록한 이미지 썸네일 다시 보는 소스 코드
+
+	[설명]
+	이 코드는 단지 image drag & drop과 indexedDB 활용을 위한 연습용 코드임. 
+	localStorage는 허용 용량 등의 한계, DB와 같은 구조의어려움 등이 있는데 비해 
+	indexedDB는 마치 Database처럼 사용할 수 있는 장점이 있음.
+
+	Jul 08 2016
+	code by Ryu
+	-->
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
